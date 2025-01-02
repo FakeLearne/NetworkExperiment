@@ -5,11 +5,13 @@ import queue
 import matplotlib.pyplot as plt
 
 # 参数设置
-BUFFER_SIZE = 1
+BUFFER_SIZE = 10
 SIMULATION_TIME = 30  # 模拟时间（秒）
-PACKET_GEN_RATE_START = 2  # 初始数据包生成率（每秒）
+PACKET_GEN_RATE_START = 8  # 初始数据包生成率（每秒）
+PACKET_INTERVAL_STDDEV = 0.1  # 生成数据包间隔时间的标准差
 DELAY_MEAN = 0.1  # 网络延迟的数学期望（秒）
 DELAY_STDDEV = 0.05  # 网络延迟的震荡幅度（标准差）
+RETRY_TIME = 0.1
 
 # 全局变量
 packets_sent = 0
@@ -33,6 +35,7 @@ class Packet:
     def __init__(self, src, dest, path, seq_num, timestamp):
         self.src = src
         self.dest = dest
+        self.pre = src
         self.path = 0  # 当前路径的位置索引
         self.seq_num = seq_num
         self.timestamp = timestamp
@@ -50,17 +53,19 @@ class Router:
         with self.lock:
             if not self.buffer.full():
                 self.buffer.put(packet)
-                print(f"{self.name} received packet {packet.packet_id} from {packet.src}")
+                # print(f"{self.name} received packet {packet.packet_id} from {packet.src}")
+                packet.path += 1
                 return True
             else:
-                print(f"{self.name} buffer full. Packet {packet.packet_id} dropped.")
+                print(f"{self.name} buffer full. Packet {packet.packet_id} blocked.")
                 return False
 
     def process_packets(self):
         global packets_received, packets_dropped
         while True:
             try:
-                packet = self.buffer.get(timeout=0.1)
+                with self.lock:
+                    packet = self.buffer.get(timeout=0.1)
                 # 模拟处理时间和网络延迟
                 delay = max(0, random.gauss(DELAY_MEAN, DELAY_STDDEV))
                 time.sleep(delay)
@@ -70,17 +75,30 @@ class Router:
                     receiver_stats[packet.dest].append(time.time() - packet.timestamp)
                     with lock:
                         packets_received += 1
-                    print(f"{self.name} forwarded packet {packet.packet_id} to Host {packet.dest}")
+                    # print(f"{self.name} forwarded packet {packet.packet_id} to Host {packet.dest}")
+                    print(f"Host {packet.dest} received packet {packet.packet_id} from {self.name}")
                 else:
                     next_router = packet.path_list[packet.path]
-                    success = next_router.receive_packet(packet)
-                    if success:
-                        packet.path += 1
+                    # print(f"{self.name} forwarded packet {packet.packet_id} to {next_router.name}")
+                    while True:
                         print(f"{self.name} forwarded packet {packet.packet_id} to {next_router.name}")
-                    else:
-                        # 转发失败，丢包
-                        with lock:
-                            packets_dropped += 1
+                        success = next_router.receive_packet(packet)
+                        with self.lock:
+                            if success:
+                                print(f"{next_router.name} received packet {packet.packet_id} from {self.name}")
+                                break
+                            # else:
+                            #     # packets_dropped += 1
+                        time.sleep(RETRY_TIME)
+                    # success = next_router.receive_packet(packet)
+                    # if success:
+                    #     # packet.path += 1
+                    #     # print(f"{self.name} forwarded packet {packet.packet_id} to {next_router.name}")
+                    #     print(f"{next_router.name} received packet {packet.packet_id} from {self.name}")
+                    # else:
+                    #     # 转发失败，丢包
+                    #     with lock:
+                    #         packets_dropped += 1
             except queue.Empty:
                 continue
 
@@ -105,16 +123,22 @@ class Host:
                 timestamp=time.time()
             )
             first_router = self.path_list[0]
-            success = first_router.receive_packet(packet)
-            with self.lock:
-                if success:
-                    packets_sent += 1
-                    self.seq_num += 1
-                else:
-                    packets_dropped += 1
+            while True:
+                success = first_router.receive_packet(packet)
+                with self.lock:
+                    if success:
+                        packets_sent += 1
+                        self.seq_num += 1
+                        print(f"{first_router.name} received packet {packet.packet_id} from {packet.src}")
+                        break
+                    # else:
+                    #     # packets_dropped += 1
+                sleeptime = max(0, random.gauss(1 / self.send_rate, PACKET_INTERVAL_STDDEV))
+                time.sleep(sleeptime)
             # 根据拥塞控制算法调整发送速率
             # self.adjust_send_rate()
-            time.sleep(1 / self.send_rate)
+            sleeptime = max(0, random.gauss(1/self.send_rate, PACKET_INTERVAL_STDDEV))
+            time.sleep(sleeptime)
 
     # def adjust_send_rate(self):
     #     # 简单的拥塞控制算法示例
@@ -219,3 +243,4 @@ for host, delays in receiver_stats.items():
         print(f"Host {host} average delay: {avg_delay:.4f}s over {len(delays)} packets")
     else:
         print(f"Host {host} received no packets.")
+
