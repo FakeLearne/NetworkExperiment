@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 # 参数设置
 BUFFER_SIZE = 10
-SIMULATION_TIME = 12  # 模拟时间（秒）
+SIMULATION_TIME = 100  # 模拟时间（秒）
 PACKET_GEN_RATE_START = 1.2  # 初始数据包生成率（每秒）
 PACKET_INTERVAL_STDDEV = 0.5  # 生成数据包间隔时间的标准差
 DELAY_MEAN = 0.5  # 路由器处理数据包的延迟的数学期望（秒）
